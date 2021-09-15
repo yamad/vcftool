@@ -4,15 +4,6 @@ Reads a [VCF v4.1](https://samtools.github.io/hts-specs/VCFv4.1.pdf) file and an
 
 Integrates information from the [ExAC API](http://exac.hms.harvard.edu).
 
-## Usage
-
-Download the code, then `pip install` the package, and run the provided `vcf-annotate` tool:
-
-    pip install .
-    vcf-annotate input.vcf > output.tsv 
-
-### Command-line help
-
 ```
 $ vcf-annotate --help
 usage: vcf-annotate [-h] [vcf_file] [out_file]
@@ -27,13 +18,46 @@ optional arguments:
   -h, --help  show this help message and exit
 ```
 
+## Quickstart
+
+Download the code, then `pip install` the package, and run the provided `vcf-annotate` tool:
+
+    pip install .
+    vcf-annotate input.vcf > output.csv
+
+## Output
+
+The tool outputs a CSV file with one row per variant and the following columns,
+
+variant_id
+: as CHROM-POS-REF-ALT format
+
+type
+: variant type (mis, snp, del, ins)
+
+consequence
+: most deleterious consequence of variant. follows Sequence Ontology naming and order
+
+depth
+: read depth at variant site (DP in VCF INFO)
+
+read_count
+: read count supporting the variant (AO in VCF INFO)
+
+read_percent
+: percentage of reads supporting variant versus reads supporting reference. nan if no reference reads
+
+exac_frequency
+: allele frequency from ExAC database. empty if not available
+
+quality
+: QUAL score from VCF entry
+
 ## Notes
 
-Currently known to support the VCF v4.1 output of the [freeBayes](https://github.com/freebayes/freebayes) variant detector.
+Currently known to support VCF v4.1 output of the [freeBayes](https://github.com/freebayes/freebayes) variant detector.
 
-It does not fully support the VCF v4.1 specification, nor does it (knowingly) support later VCF specifications.
-
-
+However, it does not fully support the VCF v4.1 specification, nor does it (knowingly) support later VCF specifications.
 
 ## Missing VCF Features
 
@@ -41,9 +65,15 @@ It does not fully support the VCF v4.1 specification, nor does it (knowingly) su
 * Structural variants
 * Per-sample interpretation
 
+Some of these will require a more production-quality parser than the string splitting technique prototyped here.
+
 ## Requirements
 
 * Python 3.9
+
+## Performance
+
+This implementation streams the VCF file to emit one record at a time so that very little is held in memory at any time. A cost of this approach is that the ExAC API is pinged once for every variant id, instead of in batches. Depending on the final use case, the strategy may be altered to do more in batch.
 
 ## Development
 

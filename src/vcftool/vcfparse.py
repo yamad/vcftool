@@ -4,80 +4,23 @@ The parse format follows the spec at https://samtools.github.io/hts-specs/VCFv4.
 
 Later VCF formats are not supported.
 """
-import argparse
-import csv
+import json
 import logging
-import sys
-from collections import namedtuple
-from typing import TextIO, Union, Sequence, Optional
+from typing import Optional, Sequence, TextIO
 
-from vcftool import exac
-from vcftool.vcftypes import VCFMeta, Consequence
+import requests
+
+from vcftool.types import MISSING_VALUE, Consequence
 
 logger = logging.getLogger(__name__)
 
-MISSING_VALUE = ""
 
 class VCFParseError(Exception):
     """Generic parse error for VCF file"""
 
 
-class NotAKeyValueError(VCFParseError):
-    """Did not get expected key=value pair"""
-
-
 class NotAFieldListError(VCFParseError):
     """Expected comma-separated list of key=value pairs"""
-
-
-def parse_header(vcf: TextIO, skip: bool = False) -> VCFMeta:
-    """Consume and parse VCF header lines"""
-    vcfmeta = VCFMeta()
-
-    for line in vcf:
-        if not line.startswith("##"):
-            break
-
-        if skip:
-            continue
-
-        try:
-            line = line.lstrip("#")
-            line = line.rstrip("\n")
-            key, value = parse_key_value(line)
-        except VCFParseError as err:
-            logger.info("Failed on line: %s", line)
-            raise
-
-        if key == "INFO":
-            vcfmeta.infos[value["ID"]] = value
-        elif key == "FILTER":
-            vcfmeta.filters[value["ID"]] = value
-        elif key == "FORMAT":
-            vcfmeta.formats[value["ID"]] = value
-        elif key == "ALT":
-            vcfmeta.alts[value["ID"]] = value
-        elif key == "contig":
-            vcfmeta.contigs[value["ID"]] = value
-        elif key in ["SAMPLE", "PEDIGREE"]:
-            logger.warning("%s header fields are not parsed yet", key)
-        else:
-            vcfmeta.meta[key] = value
-
-    return vcfmeta
-
-
-def parse_key_value(line: str) -> tuple[str, Union[str, dict]]:
-    try:
-        key, value = line.split("=", maxsplit=1)
-    except ValueError:
-        raise NotAKeyValueError("malformed key=value line")
-
-    if value.startswith("<"):
-        value = value.strip("<>")  # strip brackets
-        value = parse_field_list(value, field_sep=",")
-
-    return key, value
 
 
 def parse_field_list(input: str, field_sep: str = ";", kv_sep: str = "=") -> dict:
@@ -106,7 +49,6 @@ def parse_field_list(input: str, field_sep: str = ";", kv_sep: str = "=") -> dic
     try:
         fields = input.split(field_sep)
         kv_pairs = (f.split(kv_sep) for f in fields)
-
         return {k: v for k, v in kv_pairs}
     except ValueError as err:
         raise NotAFieldListError(
@@ -114,74 +56,53 @@ def parse_field_list(input: str, field_sep: str = ";", kv_sep: str = "=") -> dic
         ) from err
 
 
-def annotate_vcf_variants(vcf: TextIO, out_buffer: TextIO):
-    writer = csv.writer(out_buffer, delimiter=",")
-    meta = parse_header(vcf, skip=True)
-
-    writer.writerow(["variant_id", "type", "effect", "depth", "variant_count", "read_percent", "exac_freq", "quality"])
-    for line in vcf:
-        for record in variant_records(line.rstrip("\n")):
-            writer.writerow(record)
-
-VariantRecord = namedtuple("VariantRecord", "variant_id type effect depth read_count read_percent exac_frequency quality")
-
-
-def variant_records(vcf_line: str):
-    """Generate variant record(s) from VCFv4.1 record line
-
-    Note that one VCF line will emit 1 or more variant record,
-    depending on the number of alternate alleles in the VCF line.
-    """
-    chrom, pos, id_, ref, alt, qual, filter_, info = vcf_line.split("\t")[:8]
-    info = parse_field_list(info)
-
-    alleles = alt.split(",")
-    types = info.get("TYPE", "").split(",")
-    read_counts = info.get("AO", "").split(",")
-
-    if not len(alleles) == len(types) == len(read_counts):
-        raise ValueError("malformed record. missing information for alleles")
-
-    depth = info.get("DP", MISSING_VALUE)
-
-    for allele, type_, read_count in zip(alleles, types, read_counts):
-        variant_id = f"{chrom}-{pos}-{ref}-{allele}"
-        read_count = int(read_count)
-        read_percent = (read_count + 1) / (int(info.get("RO", 0)) + 1) * 100
-
-        exac_record = exac.fetch_variant(variant_id)
-        major_effect = most_serious_consequence(exac_record.get("consequence", {}))
-        allele_frequency = exac_record.get("variant", {}).get("allele_freq", MISSING_VALUE)
-
-        yield VariantRecord(variant_id, type_, major_effect, depth, read_count, f"{read_percent:.2f}", allele_frequency, qual)
-
-
-def most_serious_consequence(consequence: Optional[dict]) -> Optional[str]:
+def most_serious_consequence(
+    consequence: Optional[dict], default=MISSING_VALUE
+) -> Optional[str]:
     """Return the most deleterious consequence from ExAC consequence record
 
-    Sort by order of Consequence enum
+    The order is defined by the `vcftool.types.Consequence` enum
+
+    ExAC API will return either a null or a JSON object under the
+    `consequence` attribute, so we handle both possiblities here. If
+    no value is available, return `default` value.
     """
     if consequence is None:
-        return MISSING_VALUE
+        return default
 
     def severity(conseq):
         return getattr(Consequence, conseq, Consequence.unknown)
 
     sorted_effects = sorted(consequence.keys(), key=severity)
-    return next(iter(sorted_effects), MISSING_VALUE)
+    return next(iter(sorted_effects), default)
 
 
-def main():
-    logging.basicConfig(level=logging.INFO)
-    parser = argparse.ArgumentParser(description="Variant annotation tool")
-    parser.add_argument("vcf_file", nargs="?", type=argparse.FileType("rt"), default=sys.stdin, help="VCF v4.1 input file (default: stdin)")
-    parser.add_argument("out_file", nargs="?", type=argparse.FileType("wt"), default=sys.stdout, help="Annotation output file (default: stdout)")
-    args = parser.parse_args(sys.argv[1:])
+def count_header_lines(file: TextIO, header_prefix="##"):
+    """Return number of header lines, indicated by `header_prefix`, in `file`"""
+    header_count = 0
+    for line in file:
+        if not line.startswith(header_prefix):
+            break
+        header_count += 1
+    return header_count
 
-    annotate_vcf_variants(args.vcf_file, args.out_file)
+
+def fetch_exac_bulk_variant(variant_ids: Sequence[str]):
+    """Fetch variant data for multiple variants from ExAC /bulk/variant endpoint"""
+    res = requests.post(
+        "http://exac.hms.harvard.edu/rest/bulk/variant",
+        data=json.dumps(variant_ids),
+        timeout=2,
+    )
+
+    res.raise_for_status()
+    return res.json()
 
 
-if __name__ == "__main__":
-    with open("/Users/jyh/Downloads/tempus_challenge_data.vcf", "rt") as f:
-        with open("output.tsv", "wt") as out:
-            annotate_vcf_variants(f, out)
+def fetch_exac_variant(variant_id):
+    """Fetch variant data for a single variant from ExAC /variant endpoint"""
+    res = requests.get(
+        f"http://exac.hms.harvard.edu/rest/variant/{variant_id}", timeout=2
+    )
+    res.raise_for_status()
+    return res.json()
