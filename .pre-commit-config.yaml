@@ -1,0 +1,32 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.1.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-added-large-files
+    -   id: check-case-conflict
+    -   id: check-toml
+    -   id: check-json
+    -   id: check-yaml
+    -   id: check-merge-conflict
+    -   id: mixed-line-ending
+-   repo: https://github.com/pre-commit/mirrors-pylint
+    rev: v2.5.3
+    hooks:
+    -   id: pylint
+        name: Python Import Check
+        entry: pylint
+        args: ["--disable=all", "--enable=E0602,E0611,W0611"]
+-   repo: https://github.com/timothycrosley/isort
+    rev: 5.1.4
+    hooks:
+    -   id: isort
+        additional_dependencies: ["toml"]
+-   repo: https://github.com/psf/black
+    rev: 19.10b0
+    hooks:
+    - id: black
+      language_version: python3.9
