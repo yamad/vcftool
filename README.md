@@ -24,8 +24,17 @@ optional arguments:
 
 Download the code, then `pip install` the package, and run the provided `vcf-annotate` tool:
 
+    git clone https://github.com/yamad/vcftool
+    cd vcftool
+    python3.9 -m venv venv
+    source venv/bin/activate
+
     pip install .
     vcf-annotate input.vcf output.csv
+
+## Requirements
+
+* Python 3.9
 
 ## Output
 
@@ -69,13 +78,22 @@ However, it does not fully support the VCF v4.1 specification, nor does it (know
 
 Some of these will require a more production-quality parser than the string splitting technique prototyped here.
 
-## Requirements
+## Operating modes
 
-* Python 3.9
+There are two operating modes availble: streaming and batch.
 
-## Performance
+The streaming mode is implemented in vanilla python. The VCF is parsed one record at a time. The benefit is that very little is held in memory at any time, but it currently sends requests to the ExAC API once for every variant id. This will be undesirable in a production environment because the ExAC API will likely throttle the requests.
 
-This implementation streams the VCF file to emit one record at a time so that very little is held in memory at any time. A cost of this approach is that the ExAC API is pinged once for every variant id, instead of in batches. This is likely undesirable in a production environment because the ExAC API will likely throttle the requests. Depending on the final use case, the strategy may be altered to do more in batch.
+The batch mode uses the pandas library to support data manipulation. The whole VCF is loaded and parsed at once. For VCF data that easily fits in memory, this is a preferable approach.
+
+## Testing
+
+Tests are implemented using the pytest framework. To run them,
+
+```
+pip install '.[test]'
+pytest
+```
 
 ## Development
 
