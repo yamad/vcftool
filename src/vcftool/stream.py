@@ -1,3 +1,15 @@
+"""VCF annotation, streaming implementation
+
+This file implements variant annotation as a one-by-one streaming
+process and uses only built-in vanilla python. A streaming
+implementation may be appropriate where the VCF records are known to
+be very large and cannot fit into available memory.
+
+However, the one-by-one process makes a separate call to the ExAC API
+for every record, which is probably impractical in actual use. A
+solution may be to buffer the records so it operates in small batches.
+"""
+
 from typing import Iterable, TextIO
 
 from vcftool.types import VariantRecord
@@ -20,7 +32,7 @@ def annotate_vcf_variants(vcf: TextIO) -> Iterable[VariantRecord]:
     """
     # skip file header
     for line in vcf:
-        if not line.startswith("#"):
+        if not line.startswith("##"):
             break
 
     for line in vcf:
@@ -65,7 +77,7 @@ def _make_variant_record(
     ao = int(ao)
     ro = int(info.get("RO", 0))
     if ro == 0:
-        read_percent = math.nan
+        read_percent = math.inf
     else:
         read_percent = ao / ro * 100
 
@@ -77,9 +89,7 @@ def _make_variant_record(
         consequence=most_serious_consequence(exac_record.get("consequence", {})),
         depth=info.get("DP", MISSING_VALUE),
         read_count=ao,
-        read_percent=f"{read_percent:.2f}"
-        if read_percent is not math.nan
-        else MISSING_VALUE,
+        read_percent=read_percent,
         exac_frequency=exac_record.get("variant", {}).get("allele_freq", MISSING_VALUE),
         quality=qual,
     )

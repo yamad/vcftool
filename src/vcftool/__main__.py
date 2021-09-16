@@ -2,8 +2,8 @@ import argparse
 import csv
 import logging
 import sys
+from typing import TextIO
 
-from vcftool.stream import annotate_vcf_variants
 from vcftool.types import VariantRecord
 
 
@@ -25,11 +25,34 @@ def main():
         default=sys.stdout,
         help="Annotation output file (default: stdout)",
     )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--batch",
+        action="store_true",
+        default=True,
+        help="run in batch mode over entire file (default)",
+    )
+    group.add_argument(
+        "--stream",
+        action="store_true",
+        default=False,
+        help="run in streaming mode over entries",
+    )
     args = parser.parse_args(sys.argv[1:])
 
-    annotated_variants = annotate_vcf_variants(args.vcf_file)
+    annotate(args.vcf_file, args.out_file, args.stream)
 
-    writer = csv.writer(args.out_file, delimiter=",")
+
+def annotate(vcf_file: TextIO, out_file: TextIO, stream=True):
+    if stream:
+        from vcftool.stream import annotate_vcf_variants
+    else:
+        from vcftool.batch import annotate_vcf_variants
+
+    annotated_variants = annotate_vcf_variants(vcf_file)
+
+    writer = csv.writer(out_file, delimiter=",")
     writer.writerow(VariantRecord._fields)
     for record in annotated_variants:
         writer.writerow(record)

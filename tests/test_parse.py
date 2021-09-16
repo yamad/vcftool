@@ -6,7 +6,9 @@ def test_variant_record_single_allele():
     single_variant_vcf = "1	931393	.	G	T	2.17938e-13	.	AB=0;ABP=0;AC=0;AF=0;AN=6;AO=95;CIGAR=1X;DP=4124;DPB=4124;DPRA=0.999031;EPP=9.61615;EPPR=316.776;GTI=0;LEN=1;MEANALT=1;MQM=59.7579;MQMR=65.2274;NS=2;NUMALT=1;ODDS=591.29;PAIRED=0.989474;PAIREDR=0.966741;PAO=0;PQA=0;PQR=0;PRO=0;QA=3774;QR=160284;RO=4029;RPL=51;RPP=4.13032;RPPR=101.278;RPR=44;RUN=1;SAF=40;SAP=8.15326;SAR=55;SRF=1663;SRP=269.369;SRR=2366;TYPE=snp	GT:GQ:DP:DPR:RO:QR:AO:QA	0/0/0:132.995:2063:2063,0:2063:82063:0:0	0/0/0:132.995:2061:2061,95:1966:78221:95:3774"
     actual = list(variant_records(single_variant_vcf))
     assert [
-        VariantRecord("1-931393-G-T", "snp", "", "4124", 95, "2.36", "", "2.17938e-13")
+        VariantRecord(
+            "1-931393-G-T", "snp", "", "4124", 95, 2.3579051873914123, "", "2.17938e-13"
+        )
     ] == actual
 
 
@@ -20,7 +22,7 @@ def test_variant_record_multi_allele():
             "",
             "3964",
             106,
-            "2.79",
+            2.790942601369142,
             "",
             "1.17455e-12",
         ),
@@ -30,7 +32,7 @@ def test_variant_record_multi_allele():
             "",
             "3964",
             52,
-            "1.37",
+            1.369141653501843,
             "",
             "1.17455e-12",
         ),

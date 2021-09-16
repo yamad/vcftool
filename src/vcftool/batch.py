@@ -1,30 +1,71 @@
+"""VCF annotation, batch implementation
+
+Main usage::
+
+    with open(path_to_file, "rt") as f:
+        for record in annotate_vcf_variants(f):
+            ...
+
+This file implements variant annotation as a batch operation over an
+entire VCF file, using pandas to streamline the data manipulation
+steps. Batch mode is appropriate where the VCF file can fit into
+memory. If the file is too large, the records can be split to operate
+on sections of the file at a time.
+"""
+
 import logging
 from itertools import islice
-from os import PathLike
-from typing import Iterable
+from typing import Iterable, TextIO
 
 import pandas as pd
 
 from vcftool.vcfparse import count_header_lines, fetch_exac_bulk_variant
 
-from .types import MISSING_VALUE
+from .types import MISSING_VALUE, VariantRecord
 from .vcfparse import most_serious_consequence, parse_field_list
 
 logger = logging.getLogger(__name__)
 
 
-def read_vcf(path: PathLike) -> pd.DataFrame:
-    """Read VCF records from vcf v4.1 file at `path`"""
-    with open(path, "rt") as f:
-        header_count = count_header_lines(f)
+def annotate_vcf_variants(vcf: TextIO) -> Iterable[VariantRecord]:
+    """Generate variant records from VCF file buffer in batch
 
-    df = pd.read_table(path, skiprows=header_count, sep="\t")
+    Usage::
+
+        with open(path_to_file, "rt") as f:
+           for record in annotate_vcf_variants(f):
+               print(record)
+    """
+    df = read_vcf(vcf)
+    df = expand_variants(df)
+
+    logger.info("Fetching ExAC metadata...")
+    exac_df = fetch_exac_data(df["variant_id"])
+    df = df.merge(exac_df)
+
+    df["read_percent"] = df["ao"].astype(int) / df["ro"].astype(int) * 100
+    df["read_count"] = df["ao"]
+
+    return df[list(VariantRecord._fields)].itertuples(index=False, name="VariantRecord")
+
+
+def read_vcf(vcf: TextIO) -> pd.DataFrame:
+    """Read VCF records from vcf v4.1 file at `path`"""
+    header_count = count_header_lines(vcf)
+    vcf.seek(0)
+
+    df = pd.read_table(
+        vcf, skiprows=header_count, usecols=range(8), dtype=str, sep="\t"
+    )
     df.columns = df.columns.str.lstrip("#")
 
     # expand INFO fields
     info_df = pd.DataFrame(df["INFO"].apply(parse_field_list).to_list())
     df = pd.concat(
-        [df[["CHROM", "POS", "REF", "ALT"]], info_df[["TYPE", "DP", "AO", "RO"]]],
+        [
+            df[["CHROM", "POS", "REF", "ALT", "QUAL"]],
+            info_df[["TYPE", "DP", "AO", "RO"]],
+        ],
         axis=1,
     )
 
@@ -36,13 +77,16 @@ def read_vcf(path: PathLike) -> pd.DataFrame:
     return df
 
 
-def expand_variants(df) -> pd.DataFrame:
-    long = []
+def expand_variants(df: pd.DataFrame) -> pd.DataFrame:
+    """Expand multi-allele VCF records so every variant has its own row"""
+    rows = []
     for row in df.itertuples():
         for alt, type, ao in zip(row.ALT, row.TYPE, row.AO):
             variant_id = f"{row.CHROM}-{row.POS}-{row.REF}-{alt}"
-            long.append((variant_id, type, ao, row.RO, row.DP))
-    return pd.DataFrame(long, columns=["variant_id", "type", "ao", "ro", "dp"])
+            rows.append((variant_id, type, ao, row.RO, row.DP, row.QUAL))
+    return pd.DataFrame(
+        rows, columns=["variant_id", "type", "ao", "ro", "depth", "quality"]
+    )
 
 
 def fetch_exac_data(variant_ids):
@@ -72,13 +116,3 @@ def chunked(iterable: Iterable, n: int):
             yield chunk
         else:
             return
-
-
-def main(path):
-    df = read_vcf(path)
-    df = expand_variants(df)
-
-    logger.info("Fetching ExAC metadata...")
-    exac_df = fetch_exac_data(df["variant_id"])
-    df = df.merge(exac_df)
-    return df
